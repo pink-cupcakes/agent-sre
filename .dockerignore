@@ -1,0 +1,13 @@
+.env
+.env.*
+.claude/
+.git/
+.github/
+tests/
+charts/
+infrastructure/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/

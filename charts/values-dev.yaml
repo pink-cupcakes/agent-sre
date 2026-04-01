@@ -1,0 +1,16 @@
+image:
+  repository: 258131496527.dkr.ecr.us-west-2.amazonaws.com/agent-sre
+
+namespace: agent-sre-dev
+
+replicaCount: 1
+
+ingress:
+  enabled: true
+  host: dev-agent-sre.pump.co  # TODO: confirm hostname with infra team
+
+env:
+  DEPLOYMENT_ENV: development
+  DD_ENV: dev
+
+secretsManagerPath: agent-sre/dev/secrets

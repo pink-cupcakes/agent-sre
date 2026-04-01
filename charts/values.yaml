@@ -1,0 +1,46 @@
+# Base values — overridden per environment via values-{env}.yaml
+
+image:
+  repository: ""  # set in values-{env}.yaml
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+namespace: agent-sre
+
+service:
+  port: 8001
+
+ingress:
+  enabled: false
+  host: ""
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+env:
+  SERVICE_NAME: agent-sre
+  DEPLOYMENT_ENV: development
+  DD_SERVICE: agent-sre
+  DD_ENV: dev
+  DD_LOGS_INJECTION: "true"
+  LLM_MODEL: claude-sonnet-4-20250514
+  AGENT_MAX_STEPS: "20"
+
+# AWS Secrets Manager path — must contain ANTHROPIC_API_KEY
+secretsManagerPath: agent-sre/dev/secrets
+
+securityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  runAsNonRoot: true
+  runAsUser: 1002
+  runAsGroup: 1002
