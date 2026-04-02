@@ -60,6 +60,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="agent-sre", lifespan=lifespan, root_path="/agent-sre")
 
+import logging
+_uvicorn_access = logging.getLogger("uvicorn.access")
+
+
+class _SuppressProbes(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "/health" not in msg and "/ready" not in msg
+
+
+_uvicorn_access.addFilter(_SuppressProbes())
+
 
 # ---------------------------------------------------------------------------
 # Routes
