@@ -42,7 +42,7 @@ class _JsonFormatter(logging.Formatter):
         record.message = record.getMessage()
         payload: dict = {
             "timestamp": self.formatTime(record, self.datefmt),
-            "level": record.levelname,
+            "status": record.levelname.lower(),
             "logger": record.name,
             "message": record.message,
             "dd.trace_id": getattr(record, "dd.trace_id", "0"),
@@ -81,6 +81,12 @@ def configure_logging(level: int = logging.INFO) -> None:
     root.setLevel(level)
     if not root.handlers:
         root.addHandler(handler)
+
+    # Override uvicorn's own formatter so access logs are also JSON
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uv_logger = logging.getLogger(name)
+        uv_logger.handlers = [handler]
+        uv_logger.propagate = False
     logging.getLogger("uvicorn.access").addFilter(_SuppressProbes())
 
 

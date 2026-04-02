@@ -18,7 +18,7 @@ spec:
         admission.datadoghq.com/enabled: "true"
       annotations:
         admission.datadoghq.com/enabled: "true"
-        ad.datadoghq.com/{{ .Chart.Name }}.logs: '[{"source": "python", "service": "{{ .Chart.Name }}"}]'
+        ad.datadoghq.com/{{ .Chart.Name }}.logs: '[{"source": "{{ .Chart.Name }}", "service": "{{ .Chart.Name }}", "type": "json"}]'
     spec:
       containers:
         - name: {{ .Chart.Name }}
