@@ -10,13 +10,12 @@ RUN pip install --no-cache-dir uv
 
 # Install dependencies before copying source so this layer is cached
 # as long as pyproject.toml doesn't change.
+# Read deps directly from pyproject.toml so the Dockerfile never drifts.
 COPY pyproject.toml /app/
-RUN uv pip install --system \
-    "anthropic>=0.30.0" \
-    "ddtrace>=2.20.1" \
-    "fastapi>=0.110.0" \
-    "uvicorn[standard]>=0.29.0" \
-    "python-dotenv>=1.0.0"
+RUN python3 -c "\
+import tomllib, subprocess; \
+deps = tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']; \
+subprocess.run(['uv','pip','install','--system'] + deps, check=True)"
 
 COPY agent/ /app/agent/
 
