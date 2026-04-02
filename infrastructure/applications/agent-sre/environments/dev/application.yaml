@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/YOUR_ORG/agent-sre  # TODO: update with actual repo URL
+    repoURL: https://github.com/pumpcard/agent-sre
     targetRevision: main
     path: charts
     helm:

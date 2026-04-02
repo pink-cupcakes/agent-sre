@@ -36,7 +36,7 @@ env:
   AGENT_MAX_STEPS: "20"
 
 # AWS Secrets Manager path — must contain ANTHROPIC_API_KEY
-secretsManagerPath: agent-sre/dev/secrets
+secretsManagerPath: agent-sre-dev
 
 securityContext:
   allowPrivilegeEscalation: false
