@@ -14,7 +14,7 @@ spec:
     - host: {{ .Values.ingress.host }}
       http:
         paths:
-          - path: /
+          - path: {{ .Values.ingress.path | default "/agent-sre" }}
             pathType: Prefix
             backend:
               service:

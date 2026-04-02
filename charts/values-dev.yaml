@@ -7,10 +7,11 @@ replicaCount: 1
 
 ingress:
   enabled: true
-  host: dev-agent-sre.pump.co  # TODO: confirm hostname with infra team
+  host: api-dev.pump.co
+  path: /agent-sre
 
 env:
   DEPLOYMENT_ENV: development
   DD_ENV: dev
 
-secretsManagerPath: agent-sre/dev/secrets
+secretsManagerPath: agent-sre-dev
