@@ -27,7 +27,7 @@ from ddtrace import config as dd_config
 from ddtrace import patch as dd_patch
 from ddtrace import tracer
 
-from ..config import Config
+from agent.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -93,19 +93,19 @@ class Telemetry:
     """
 
     @classmethod
-    def configure(cls, config: Config, writer=None) -> "Telemetry":
+    def configure(cls, config: Config, trace_processor=None) -> "Telemetry":
         """
         Set service metadata and register shutdown.
 
-        Pass writer= in tests to capture spans in memory instead of
+        Pass trace_processor= in tests to capture spans in memory instead of
         forwarding to the Datadog agent.
         """
         configure_logging()
         dd_config.env = config.deployment_env
         dd_config.service = config.service_name
 
-        if writer is not None:
-            tracer.configure(writer=writer)
+        if trace_processor is not None:
+            tracer.configure(trace_processors=[trace_processor])
 
         instance = cls()
         atexit.register(instance.shutdown)

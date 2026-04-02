@@ -1,15 +1,3 @@
-"""
-Agent — executes tasks.
-
-Telemetry is an app-level concern configured separately before creating an
-Agent.  Call Telemetry.configure(config) at startup; Agent uses the global
-ddtrace tracer and never holds a reference to the Telemetry instance.
-
-    config = load_config()
-    Telemetry.configure(config)
-    agent = Agent.create(config)
-    result = agent.run_task(Task(...))
-"""
 from __future__ import annotations
 
 import logging
@@ -18,13 +6,13 @@ from typing import Optional
 
 from ddtrace import tracer
 
-from .config import Config, load_config
-from .llm import LLMClient
-from .memory.session import SessionStore
-from .memory.store import MemoryStore
-from .models import Task, TaskResult
-from .orchestration import Orchestrator
-from .tools import ToolRegistry, default_tools
+from agent.config import Config, load_config
+from agent.llm import LLMClient
+from agent.memory.session import SessionStore
+from agent.memory.store import MemoryStore
+from agent.models import Task, TaskResult
+from agent.orchestration import Orchestrator
+from agent.tools import ToolRegistry, default_tools
 
 logger = logging.getLogger(__name__)
 

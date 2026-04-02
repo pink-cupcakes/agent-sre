@@ -1,20 +1,19 @@
 """
 Orchestrator — drives the decide → act → observe loop.
-
-Child spans for loop iterations, LLM calls, and tool calls are added in
-initiative 02.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 
-from ..config import Config
-from ..llm import LLMClient, LLMResponse
-from ..memory.session import SessionStore
-from ..memory.store import MemoryStore
-from ..models import Task
-from ..tools import ToolRegistry
+from ddtrace import tracer
+
+from agent.config import Config
+from agent.llm import LLMClient, LLMResponse
+from agent.memory.session import SessionStore
+from agent.memory.store import MemoryStore
+from agent.models import Task
+from agent.tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -68,90 +67,76 @@ class Orchestrator:
         for step_number in range(1, self._config.max_steps + 1):
             logger.info("orchestrator step %d", step_number)
 
-            try:
-                llm_response = self._llm.call(
-                    messages=session.messages,
-                    system=self.SYSTEM_PROMPT,
-                    tools=self._tools.definitions() or None,
-                )
-            except Exception as exc:
-                logger.exception("LLM call failed on step %d", step_number)
-                steps.append(
-                    StepRecord(step_number=step_number, decision_type="error", tool_name=None)
-                )
-                return OrchestrationResult(
-                    output="",
-                    success=False,
-                    step_count=step_number,
-                    steps=steps,
-                    error=str(exc),
-                    tokens_total=tokens_total,
-                )
+            with tracer.trace("agent.step") as step_span:
+                step_span.set_tags({"step.number": step_number})
 
-            tokens_total += llm_response.tokens_total
-
-            if llm_response.is_final_answer:
-                steps.append(
-                    StepRecord(
-                        step_number=step_number,
-                        decision_type="final_answer",
-                        tool_name=None,
-                        llm_response=llm_response,
+                try:
+                    llm_response = self._llm.call(
+                        messages=session.messages,
+                        system=self.SYSTEM_PROMPT,
+                        tools=self._tools.definitions() or None,
                     )
-                )
-                session.add_message("assistant", llm_response.content)
-                self._sessions.save(session)
-                return OrchestrationResult(
-                    output=llm_response.content,
-                    success=True,
-                    step_count=step_number,
-                    steps=steps,
-                    tokens_total=tokens_total,
-                )
-
-            if llm_response.is_tool_call:
-                tool_results_for_llm: list[dict] = []
-
-                for tc in llm_response.tool_calls:
-                    tool_result = self._tools.execute(tc["name"], tc["input"])
-                    steps.append(
-                        StepRecord(
-                            step_number=step_number,
-                            decision_type="tool_call",
-                            tool_name=tc["name"],
-                            llm_response=llm_response,
-                        )
-                    )
-                    tool_results_for_llm.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": tc["id"],
-                            "content": str(tool_result.output)
-                            if tool_result.success
-                            else f"Error: {tool_result.error}",
-                        }
+                except Exception as exc:
+                    step_span.set_tags({"step.decision_type": "error"})
+                    step_span.set_traceback()
+                    logger.exception("LLM call failed on step %d", step_number)
+                    steps.append(StepRecord(step_number=step_number, decision_type="error", tool_name=None))
+                    return OrchestrationResult(
+                        output="", success=False, step_count=step_number,
+                        steps=steps, error=str(exc), tokens_total=tokens_total,
                     )
 
-                session.add_message(
-                    "assistant",
-                    [
-                        {
-                            "type": "tool_use",
-                            "id": tc["id"],
-                            "name": tc["name"],
-                            "input": tc["input"],
-                        }
+                tokens_total += llm_response.tokens_total
+
+                if llm_response.is_final_answer:
+                    step_span.set_tags({"step.decision_type": "final_answer"})
+                    steps.append(StepRecord(
+                        step_number=step_number, decision_type="final_answer",
+                        tool_name=None, llm_response=llm_response,
+                    ))
+                    session.add_message("assistant", llm_response.content)
+                    self._sessions.save(session)
+                    return OrchestrationResult(
+                        output=llm_response.content, success=True,
+                        step_count=step_number, steps=steps, tokens_total=tokens_total,
+                    )
+
+                if llm_response.is_tool_call:
+                    first_tool = llm_response.tool_calls[0]["name"] if llm_response.tool_calls else None
+                    step_span.set_tags({"step.decision_type": "tool_call", "step.tool_name": first_tool or ""})
+                    tool_results_for_llm = [self._execute_tool(tc, step_number, steps) for tc in llm_response.tool_calls]
+
+                    session.add_message("assistant", [
+                        {"type": "tool_use", "id": tc["id"], "name": tc["name"], "input": tc["input"]}
                         for tc in llm_response.tool_calls
-                    ],
-                )
-                session.add_message("user", tool_results_for_llm)
-                continue
+                    ])
+                    session.add_message("user", tool_results_for_llm)
 
         return OrchestrationResult(
-            output="",
-            success=False,
-            step_count=self._config.max_steps,
-            steps=steps,
-            error=f"Exceeded maximum step count ({self._config.max_steps})",
+            output="", success=False, step_count=self._config.max_steps,
+            steps=steps, error=f"Exceeded maximum step count ({self._config.max_steps})",
             tokens_total=tokens_total,
         )
+
+    def _execute_tool(self, tc: dict, step_number: int, steps: list[StepRecord]) -> dict:
+        with tracer.trace("agent.tool.call") as tool_span:
+            tool_result = self._tools.execute(tc["name"], tc["input"])
+            tool_span.set_tags({
+                "tool.name": tc["name"],
+                "tool.input_tokens": len(str(tc["input"])),
+                "tool.output_tokens": len(str(tool_result.output or "")),
+                "tool.latency_ms": tool_result.latency_ms,
+                "tool.status": "success" if tool_result.success else "error",
+            })
+            if not tool_result.success:
+                tool_span.set_traceback()
+
+        steps.append(StepRecord(
+            step_number=step_number, decision_type="tool_call",
+            tool_name=tc["name"],
+        ))
+        return {
+            "type": "tool_result",
+            "tool_use_id": tc["id"],
+            "content": str(tool_result.output) if tool_result.success else f"Error: {tool_result.error}",
+        }

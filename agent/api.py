@@ -13,10 +13,10 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from .agent import Agent
-from .config import Config, load_config
-from .models import Task
-from .observability.tracing import Telemetry
+from agent.agent import Agent
+from agent.config import Config, load_config
+from agent.models import Task
+from agent.observability.tracing import Telemetry
 
 
 # ---------------------------------------------------------------------------
