@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
     _agent = None
 
 
-app = FastAPI(title="agent-sre", lifespan=lifespan)
+app = FastAPI(title="agent-sre", lifespan=lifespan, root_path="/agent-sre")
 
 
 # ---------------------------------------------------------------------------
