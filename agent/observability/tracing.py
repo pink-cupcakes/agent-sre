@@ -17,48 +17,34 @@ to point at the agent; no API key is needed in the app.
 from __future__ import annotations
 
 import atexit
-import json
 import logging
 import sys
 import traceback
-from typing import Optional
 
 from ddtrace import config as dd_config
 from ddtrace import patch as dd_patch
 from ddtrace import tracer
+from pythonjsonlogger.json import JsonFormatter
 
 from agent.config import Config
 
 logger = logging.getLogger(__name__)
 
 
-class _JsonFormatter(logging.Formatter):
-    """
-    Emit one JSON object per log record so Datadog ingests the entire
-    traceback as a single event instead of splitting on newlines.
-    """
-
-    def format(self, record: logging.LogRecord) -> str:
-        record.message = record.getMessage()
-        payload: dict = {
-            "timestamp": self.formatTime(record, self.datefmt),
-            "status": record.levelname.lower(),
-            "logger": record.name,
-            "message": record.message,
-            "dd.trace_id": getattr(record, "dd.trace_id", "0"),
-            "dd.span_id": getattr(record, "dd.span_id", "0"),
-        }
+class _DatadogJsonFormatter(JsonFormatter):
+    def add_fields(
+        self,
+        log_data: dict,
+        record: logging.LogRecord,
+        message_dict: dict,
+    ) -> None:
+        super().add_fields(log_data, record, message_dict)
+        log_data["status"] = record.levelname.lower()
         if record.exc_info:
-            payload["error.stack"] = "".join(traceback.format_exception(*record.exc_info))
-            payload["error.kind"] = record.exc_info[0].__name__ if record.exc_info[0] else ""
-            payload["error.message"] = str(record.exc_info[1])
-        if record.stack_info:
-            payload["stack_info"] = self.formatStack(record.stack_info)
-        payload.update(
-            {k: v for k, v in record.__dict__.items()
-             if k not in logging.LogRecord.__dict__ and not k.startswith("_")}
-        )
-        return json.dumps(payload, default=str)
+            log_data["error.stack"] = "".join(traceback.format_exception(*record.exc_info))
+            log_data["error.kind"] = record.exc_info[0].__name__ if record.exc_info[0] else ""
+            log_data["error.message"] = str(record.exc_info[1])
+            log_data.pop("exc_info", None)
 
 
 class _SuppressProbes(logging.Filter):
@@ -75,8 +61,13 @@ def configure_logging(level: int = logging.INFO) -> None:
     Probe endpoints are suppressed from uvicorn access logs to reduce noise.
     """
     dd_patch(logging=True)
+    formatter = _DatadogJsonFormatter(
+        fmt=["message", "name"],  # always present; library calls getMessage() for message
+        timestamp=True,           # adds ISO-8601 "timestamp" field
+        rename_fields={"name": "logger"},
+    )
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(_JsonFormatter())
+    handler.setFormatter(formatter)
     root = logging.getLogger()
     root.setLevel(level)
     if not root.handlers:
