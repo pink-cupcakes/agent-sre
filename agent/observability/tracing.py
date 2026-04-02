@@ -18,14 +18,37 @@ from __future__ import annotations
 
 import atexit
 import logging
+import sys
 from typing import Optional
 
 from ddtrace import config as dd_config
 from ddtrace import tracer
+from ddtrace.contrib.logging import patch as dd_patch_logging
 
 from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def configure_logging(level: int = logging.INFO) -> None:
+    """
+    Configure root logger to emit JSON-compatible lines to stdout.
+    ddtrace's logging patch injects dd.trace_id/span_id into every record
+    so logs correlate with traces in Datadog.
+    """
+    dd_patch_logging()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s "
+            "[dd.trace_id=%(dd.trace_id)s dd.span_id=%(dd.span_id)s] "
+            "%(message)s"
+        )
+    )
+    root = logging.getLogger()
+    root.setLevel(level)
+    if not root.handlers:
+        root.addHandler(handler)
 
 
 class Telemetry:
@@ -44,6 +67,7 @@ class Telemetry:
         Pass writer= in tests to capture spans in memory instead of
         forwarding to the Datadog agent.
         """
+        configure_logging()
         dd_config.env = config.deployment_env
         dd_config.service = config.service_name
 

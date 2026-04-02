@@ -66,7 +66,7 @@ class Orchestrator:
         tokens_total = 0
 
         for step_number in range(1, self._config.max_steps + 1):
-            logger.debug("orchestrator step %d", step_number)
+            logger.info("orchestrator step %d", step_number)
 
             try:
                 llm_response = self._llm.call(
