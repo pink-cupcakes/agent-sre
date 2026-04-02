@@ -4,9 +4,12 @@ Production implementation will back this with DynamoDB (initiative 05).
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional, Union
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -34,11 +37,35 @@ class SessionStore:
     def create(self, session_id: str, user_id: str) -> Session:
         session = Session(session_id=session_id, user_id=user_id)
         self._sessions[session_id] = session
+        logger.info(
+            "session created",
+            extra={
+                "event": "session.created",
+                "session.id": session_id,
+                "user.id": user_id,
+            },
+        )
         return session
 
     def get_or_create(self, session_id: str, user_id: str) -> Session:
-        return self.get(session_id) or self.create(session_id, user_id)
+        existing = self.get(session_id)
+        if existing:
+            logger.info(
+                "session resumed",
+                extra={
+                    "event": "session.resumed",
+                    "session.id": session_id,
+                    "user.id": user_id,
+                    "message_count": len(existing.messages),
+                },
+            )
+            return existing
+        return self.create(session_id, user_id)
 
     def save(self, session: Session) -> None:
         session.updated_at = datetime.now(timezone.utc)
         self._sessions[session.session_id] = session
+
+    def count(self) -> int:
+        """Return the number of active in-memory sessions."""
+        return len(self._sessions)

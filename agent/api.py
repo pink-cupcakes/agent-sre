@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from agent.agent import Agent
 from agent.config import Config, load_config
 from agent.models import Task
+from agent.observability import metrics
 from agent.observability.tracing import Telemetry
 
 
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
     global _agent, _config
     _config = load_config()
     Telemetry.configure(_config)
+    metrics.init(host=_config.dd_agent_host, port=_config.dd_dogstatsd_port)
     _agent = Agent.create(_config)
     yield
     _agent = None

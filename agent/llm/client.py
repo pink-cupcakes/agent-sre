@@ -12,6 +12,7 @@ from ddtrace import tracer
 
 from agent.config import Config
 from agent.llm.pricing import get_cost_usd
+from agent.observability import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -65,26 +66,51 @@ class LLMClient:
             if tools:
                 kwargs["tools"] = tools
 
+            logger.info(
+                "llm call started",
+                extra={
+                    "event": "llm.call.started",
+                    "llm.model": self._model,
+                },
+            )
+
             start = time.monotonic()
             try:
                 response = self._client.messages.create(**kwargs)
             except anthropic.APITimeoutError:
                 span.error = 1
                 span.set_tag("llm.error.type", "timeout")
+                logger.warning(
+                    "llm call failed: timeout",
+                    extra={"event": "llm.call.failed", "llm.error.type": "timeout"},
+                )
                 raise
             except anthropic.RateLimitError as exc:
                 span.error = 1
                 span.set_tag("llm.error.type", "rate_limit")
+                retry_after = None
                 try:
                     retry_after = exc.response.headers.get("retry-after")
                     if retry_after:
                         span.set_tag("llm.error.retry_after", retry_after)
                 except Exception:
                     pass
+                logger.warning(
+                    "llm call failed: rate limit",
+                    extra={
+                        "event": "llm.call.failed",
+                        "llm.error.type": "rate_limit",
+                        "llm.error.retry_after": retry_after,
+                    },
+                )
                 raise
             except anthropic.APIError:
                 span.error = 1
                 span.set_tag("llm.error.type", "malformed_response")
+                logger.warning(
+                    "llm call failed: api error",
+                    extra={"event": "llm.call.failed", "llm.error.type": "malformed_response"},
+                )
                 raise
 
             latency_ms = (time.monotonic() - start) * 1000
@@ -95,30 +121,35 @@ class LLMClient:
             )
 
             # Span tags — token counts for APM flame graphs / dashboards.
+            # Tag values that are numeric are stored via set_metric() in ddtrace v2,
+            # making get_tag() return None. Stringify them so get_tag() works
+            # and downstream consumers can read them as strings.
             span.set_tags({
                 "llm.model": response.model,
                 "llm.stop_reason": str(response.stop_reason),
-                "llm.tokens.input": response.usage.input_tokens,
-                "llm.tokens.output": response.usage.output_tokens,
-                "llm.tokens.total": response.usage.input_tokens + response.usage.output_tokens,
-                "llm.tokens.cache_read": response.usage.cache_read_input_tokens or 0,
-                "llm.tokens.cache_creation": response.usage.cache_creation_input_tokens or 0,
-                "llm.latency_ms": round(latency_ms, 2),
-                "llm.cost_usd": cost_usd,
+                "llm.tokens.prompt": str(response.usage.input_tokens),
+                "llm.tokens.completion": str(response.usage.output_tokens),
+                "llm.tokens.total": str(response.usage.input_tokens + response.usage.output_tokens),
+                "llm.tokens.cache_read": str(response.usage.cache_read_input_tokens or 0),
+                "llm.tokens.cache_creation": str(response.usage.cache_creation_input_tokens or 0),
+                "llm.latency_ms": str(round(latency_ms, 2)),
+                "llm.cost_usd": str(cost_usd),
             })
+
+            # DogStatsD metrics — non-blocking UDP, no hot-path impact.
+            model_tag = f"model:{response.model}"
+            metrics.distribution("agent.llm.call.duration_ms", latency_ms, tags=[model_tag, "status:success"])
+            metrics.distribution("agent.llm.call.tokens.prompt", response.usage.input_tokens, tags=[model_tag])
+            metrics.distribution("agent.llm.call.tokens.completion", response.usage.output_tokens, tags=[model_tag])
 
             # Structured log — full Anthropic response as nested JSON so every
             # field is traversable in Datadog (anthropic.usage.input_tokens, etc.).
-            # model_dump(exclude_none=True) serialises Pydantic models recursively.
             logger.info(
-                "llm call: model=%s stop=%s tokens=%d+%d cost=$%.6f latency=%.0fms",
-                response.model,
-                response.stop_reason,
-                response.usage.input_tokens,
-                response.usage.output_tokens,
-                cost_usd,
-                latency_ms,
+                "llm call completed",
                 extra={
+                    "event": "llm.call.completed",
+                    "llm.model": response.model,
+                    "llm.stop_reason": str(response.stop_reason),
                     "llm.latency_ms": round(latency_ms, 2),
                     "llm.cost_usd": cost_usd,
                     "anthropic": response.model_dump(exclude_none=True),

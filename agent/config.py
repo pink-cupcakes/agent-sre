@@ -18,6 +18,9 @@ class Config:
     llm_model: str
     # Orchestration
     max_steps: int
+    # Datadog
+    dd_agent_host: str = "localhost"
+    dd_dogstatsd_port: int = 8125
 
 
 def load_config() -> Config:
@@ -27,4 +30,6 @@ def load_config() -> Config:
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
         llm_model=os.getenv("LLM_MODEL", "claude-sonnet-4-20250514"),
         max_steps=int(os.getenv("AGENT_MAX_STEPS", "20")),
+        dd_agent_host=os.getenv("DD_AGENT_HOST", "localhost"),
+        dd_dogstatsd_port=int(os.getenv("DD_DOGSTATSD_PORT", "8125")),
     )

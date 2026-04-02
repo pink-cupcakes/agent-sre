@@ -14,6 +14,8 @@ from agent.llm.pricing import get_cost_usd
 from agent.memory.session import SessionStore
 from agent.memory.store import MemoryStore
 from agent.models import Task
+from agent.observability import context as ctx
+from agent.observability import metrics
 from agent.tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,7 @@ class OrchestrationResult:
     steps: list[StepRecord] = field(default_factory=list)
     error: str | None = None
     tokens_total: int = 0
+    cost_usd: float = 0.0
 
 
 class Orchestrator:
@@ -59,8 +62,23 @@ class Orchestrator:
         self._memory = memory
 
     def run(self, task: Task) -> OrchestrationResult:
+        ctx.task_id_var.set(task.task_id)
+        ctx.session_id_var.set(task.session_id)
+
         session = self._sessions.get_or_create(task.session_id, task.user_id)
         session.add_message("user", task.prompt)
+
+        metrics.gauge("agent.session.active", self._sessions.count())
+
+        logger.info(
+            "task started",
+            extra={
+                "event": "task.started",
+                "task.id": task.task_id,
+                "task.type": task.task_type,
+                "user.id": task.user_id,
+            },
+        )
 
         steps: list[StepRecord] = []
         tokens_total = 0
@@ -68,7 +86,7 @@ class Orchestrator:
 
         for step_number in range(1, self._config.max_steps + 1):
             with tracer.trace("agent.step") as step_span:
-                step_span.set_tags({"step.number": step_number})
+                step_span.set_tags({"step.number": str(step_number)})
 
                 try:
                     llm_response = self._llm.call(
@@ -80,9 +98,9 @@ class Orchestrator:
                     step_span.set_tags({"step.decision_type": "error"})
                     step_span.set_traceback()
                     logger.exception(
-                        "agent step %d: llm error",
-                        step_number,
+                        "llm call failed",
                         extra={
+                            "event": "task.failed",
                             "step.number": step_number,
                             "step.decision_type": "error",
                             "step.tokens_accumulated": tokens_total,
@@ -92,6 +110,7 @@ class Orchestrator:
                     return OrchestrationResult(
                         output="", success=False, step_count=step_number,
                         steps=steps, error=str(exc), tokens_total=tokens_total,
+                        cost_usd=cost_total_usd,
                     )
 
                 step_cost = get_cost_usd(
@@ -110,9 +129,9 @@ class Orchestrator:
                     session.add_message("assistant", llm_response.content)
                     self._sessions.save(session)
                     logger.info(
-                        "agent step %d: final_answer tokens=%d cost=$%.6f latency=%.0fms",
-                        step_number, llm_response.tokens_total, step_cost, llm_response.latency_ms,
+                        "task completed",
                         extra={
+                            "event": "task.completed",
                             "step.number": step_number,
                             "step.decision_type": decision_type,
                             "step.tokens": llm_response.tokens_total,
@@ -125,6 +144,7 @@ class Orchestrator:
                     return OrchestrationResult(
                         output=llm_response.content, success=True,
                         step_count=step_number, steps=steps, tokens_total=tokens_total,
+                        cost_usd=cost_total_usd,
                     )
 
                 if llm_response.is_tool_call:
@@ -132,9 +152,9 @@ class Orchestrator:
                     decision_type = "tool_call"
                     step_span.set_tags({"step.decision_type": decision_type, "step.tool_name": first_tool or ""})
                     logger.info(
-                        "agent step %d: tool_call tool=%s tokens=%d cost=$%.6f latency=%.0fms",
-                        step_number, first_tool, llm_response.tokens_total, step_cost, llm_response.latency_ms,
+                        "step decided: tool call",
                         extra={
+                            "event": "step.decided",
                             "step.number": step_number,
                             "step.decision_type": decision_type,
                             "step.tool_name": first_tool,
@@ -154,38 +174,65 @@ class Orchestrator:
                     session.add_message("user", tool_results_for_llm)
 
         logger.warning(
-            "agent exceeded max steps (%d) tokens=%d cost=$%.6f",
-            self._config.max_steps, tokens_total, cost_total_usd,
+            "task exceeded max steps",
             extra={
+                "event": "task.failed",
                 "step.tokens_accumulated": tokens_total,
                 "step.cost_accumulated_usd": cost_total_usd,
+                "max_steps": self._config.max_steps,
             },
         )
         return OrchestrationResult(
             output="", success=False, step_count=self._config.max_steps,
             steps=steps, error=f"Exceeded maximum step count ({self._config.max_steps})",
-            tokens_total=tokens_total,
+            tokens_total=tokens_total, cost_usd=cost_total_usd,
         )
 
     def _execute_tool(self, tc: dict, step_number: int, steps: list[StepRecord]) -> dict:
+        logger.info(
+            "tool call started",
+            extra={
+                "event": "tool.call.started",
+                "tool.name": tc["name"],
+                "step.number": step_number,
+            },
+        )
         with tracer.trace("agent.tool.call") as tool_span:
             tool_result = self._tools.execute(tc["name"], tc["input"])
             status = "success" if tool_result.success else "error"
+            # Stringify numeric values — ddtrace v2 routes int/float through
+            # set_metric(), making get_tag() return None for them.
             tool_span.set_tags({
                 "tool.name": tc["name"],
-                "tool.input_tokens": len(str(tc["input"])),
-                "tool.output_tokens": len(str(tool_result.output or "")),
-                "tool.latency_ms": tool_result.latency_ms,
+                "tool.input_tokens": str(len(str(tc["input"]))),
+                "tool.output_tokens": str(len(str(tool_result.output or ""))),
+                "tool.latency_ms": str(round(tool_result.latency_ms, 2)),
                 "tool.status": status,
             })
             if not tool_result.success:
-                tool_span.set_traceback()
+                # ToolRegistry already caught the exception, so set_traceback()
+                # would be a no-op. Set error fields explicitly instead.
+                tool_span.error = 1
+                tool_span.set_tag("error.message", tool_result.error or "tool execution failed")
 
+        metrics.distribution(
+            "agent.tool.call.duration_ms",
+            tool_result.latency_ms,
+            tags=[f"tool_name:{tc['name']}", f"status:{status}"],
+        )
+        if not tool_result.success:
+            metrics.count(
+                "agent.tool.call.error_rate",
+                tags=[f"tool_name:{tc['name']}", "error_type:execution_error"],
+            )
+
+        event = "tool.call.completed" if tool_result.success else "tool.call.failed"
         log = logger.info if tool_result.success else logger.warning
         log(
-            "tool call: %s status=%s latency=%.0fms",
-            tc["name"], status, tool_result.latency_ms,
+            "tool call %s",
+            status,
             extra={
+                "event": event,
                 "tool.name": tc["name"],
                 "tool.status": status,
                 "tool.latency_ms": round(tool_result.latency_ms, 2),
