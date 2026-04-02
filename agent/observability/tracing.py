@@ -30,11 +30,18 @@ from ..config import Config
 logger = logging.getLogger(__name__)
 
 
+class _SuppressProbes(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "/health" not in msg and "/ready" not in msg
+
+
 def configure_logging(level: int = logging.INFO) -> None:
     """
-    Configure root logger to emit JSON-compatible lines to stdout.
+    Configure root logger to emit structured lines to stdout.
     ddtrace's logging patch injects dd.trace_id/span_id into every record
     so logs correlate with traces in Datadog.
+    Probe endpoints are suppressed from uvicorn access logs to reduce noise.
     """
     dd_patch_logging()
     handler = logging.StreamHandler(sys.stdout)
@@ -49,6 +56,7 @@ def configure_logging(level: int = logging.INFO) -> None:
     root.setLevel(level)
     if not root.handlers:
         root.addHandler(handler)
+    logging.getLogger("uvicorn.access").addFilter(_SuppressProbes())
 
 
 class Telemetry:
