@@ -12,8 +12,8 @@ from typing import List, Optional
 
 import pytest
 from ddtrace import tracer as dd_tracer
-from ddtrace.internal.writer import TraceWriter
-from ddtrace.span import Span
+from ddtrace._trace.processor import TraceProcessor
+from ddtrace.trace import Span
 
 import agent.observability.tracing as tracing_mod
 from agent import Agent, Task
@@ -23,27 +23,19 @@ from agent.orchestration import OrchestrationResult
 
 
 # ---------------------------------------------------------------------------
-# In-memory writer for test span inspection
+# In-memory processor for test span inspection
 # ---------------------------------------------------------------------------
 
 
-class SpanCapture(TraceWriter):
-    """Captures finished spans in memory instead of forwarding to the agent."""
+class SpanCapture(TraceProcessor):
+    """Captures finished traces in memory instead of forwarding to the agent."""
 
     def __init__(self) -> None:
         self._spans: List[Span] = []
 
-    def write(self, spans: List[Span]) -> None:
-        self._spans.extend(spans)
-
-    def flush_queue(self, raise_on_failure: bool = False) -> bool:
-        return True
-
-    def stop(self, timeout: Optional[float] = None) -> None:
-        pass
-
-    def recreate(self) -> "SpanCapture":
-        return SpanCapture()
+    def process_trace(self, trace: List[Span]) -> Optional[List[Span]]:
+        self._spans.extend(trace)
+        return trace
 
     def pop(self) -> List[Span]:
         spans = self._spans[:]
@@ -74,8 +66,8 @@ def test_config() -> Config:
 
 @pytest.fixture
 def telemetry(test_config, capture) -> Telemetry:
-    """Configure app-level telemetry with an in-memory writer."""
-    t = Telemetry.configure(test_config, writer=capture)
+    """Configure app-level telemetry with an in-memory trace processor."""
+    t = Telemetry.configure(test_config, trace_processor=capture)
     yield t
     t.shutdown()
 
@@ -121,17 +113,17 @@ def finished_root_spans(tel: Telemetry, cap: SpanCapture) -> List[Span]:
 
 class TestTelemetryConfiguration:
     def test_configure_does_not_raise(self, test_config, capture):
-        t = Telemetry.configure(test_config, writer=capture)
+        t = Telemetry.configure(test_config, trace_processor=capture)
         t.shutdown()
 
     def test_service_and_env_set_on_configure(self, test_config, capture):
         from ddtrace import config as dd_config
-        Telemetry.configure(test_config, writer=capture)
+        Telemetry.configure(test_config, trace_processor=capture)
         assert dd_config.service == "agent-sre-test"
         assert dd_config.env == "test"
 
-    def test_writer_override_captures_spans(self, test_config, capture):
-        t = Telemetry.configure(test_config, writer=capture)
+    def test_processor_captures_spans(self, test_config, capture):
+        t = Telemetry.configure(test_config, trace_processor=capture)
         with dd_tracer.trace("test.span"):
             pass
         t.force_flush()
