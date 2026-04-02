@@ -17,8 +17,10 @@ to point at the agent; no API key is needed in the app.
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import sys
+import traceback
 from typing import Optional
 
 from ddtrace import config as dd_config
@@ -30,6 +32,35 @@ from ..config import Config
 logger = logging.getLogger(__name__)
 
 
+class _JsonFormatter(logging.Formatter):
+    """
+    Emit one JSON object per log record so Datadog ingests the entire
+    traceback as a single event instead of splitting on newlines.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        record.message = record.getMessage()
+        payload: dict = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.message,
+            "dd.trace_id": getattr(record, "dd.trace_id", "0"),
+            "dd.span_id": getattr(record, "dd.span_id", "0"),
+        }
+        if record.exc_info:
+            payload["error.stack"] = "".join(traceback.format_exception(*record.exc_info))
+            payload["error.kind"] = record.exc_info[0].__name__ if record.exc_info[0] else ""
+            payload["error.message"] = str(record.exc_info[1])
+        if record.stack_info:
+            payload["stack_info"] = self.formatStack(record.stack_info)
+        payload.update(
+            {k: v for k, v in record.__dict__.items()
+             if k not in logging.LogRecord.__dict__ and not k.startswith("_")}
+        )
+        return json.dumps(payload, default=str)
+
+
 class _SuppressProbes(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
@@ -38,20 +69,14 @@ class _SuppressProbes(logging.Filter):
 
 def configure_logging(level: int = logging.INFO) -> None:
     """
-    Configure root logger to emit structured lines to stdout.
+    Configure root logger to emit one JSON line per record to stdout.
     ddtrace's logging patch injects dd.trace_id/span_id into every record
     so logs correlate with traces in Datadog.
     Probe endpoints are suppressed from uvicorn access logs to reduce noise.
     """
     dd_patch(logging=True)
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s %(levelname)s %(name)s "
-            "[dd.trace_id=%(dd.trace_id)s dd.span_id=%(dd.span_id)s] "
-            "%(message)s"
-        )
-    )
+    handler.setFormatter(_JsonFormatter())
     root = logging.getLogger()
     root.setLevel(level)
     if not root.handlers:
