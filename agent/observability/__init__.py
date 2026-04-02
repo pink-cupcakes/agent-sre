@@ -1,3 +1,3 @@
-from .tracing import Telemetry, get_tracer
+from .tracing import Telemetry
 
-__all__ = ["Telemetry", "get_tracer"]
+__all__ = ["Telemetry"]
