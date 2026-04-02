@@ -3,6 +3,7 @@ LLM client — wraps the Anthropic SDK.
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 
@@ -10,6 +11,9 @@ import anthropic
 from ddtrace import tracer
 
 from agent.config import Config
+from agent.llm.pricing import get_cost_usd
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -84,11 +88,42 @@ class LLMClient:
                 raise
 
             latency_ms = (time.monotonic() - start) * 1000
+            cost_usd = get_cost_usd(
+                response.model,
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+            )
 
-            span.set_tag("llm.tokens.prompt", str(response.usage.input_tokens))
-            span.set_tag("llm.tokens.completion", str(response.usage.output_tokens))
-            span.set_tag("llm.tokens.total", str(response.usage.input_tokens + response.usage.output_tokens))
-            span.set_tag("llm.latency_ms", str(latency_ms))
+            # Span tags — token counts for APM flame graphs / dashboards.
+            span.set_tags({
+                "llm.model": response.model,
+                "llm.stop_reason": str(response.stop_reason),
+                "llm.tokens.input": response.usage.input_tokens,
+                "llm.tokens.output": response.usage.output_tokens,
+                "llm.tokens.total": response.usage.input_tokens + response.usage.output_tokens,
+                "llm.tokens.cache_read": response.usage.cache_read_input_tokens or 0,
+                "llm.tokens.cache_creation": response.usage.cache_creation_input_tokens or 0,
+                "llm.latency_ms": round(latency_ms, 2),
+                "llm.cost_usd": cost_usd,
+            })
+
+            # Structured log — full Anthropic response as nested JSON so every
+            # field is traversable in Datadog (anthropic.usage.input_tokens, etc.).
+            # model_dump(exclude_none=True) serialises Pydantic models recursively.
+            logger.info(
+                "llm call: model=%s stop=%s tokens=%d+%d cost=$%.6f latency=%.0fms",
+                response.model,
+                response.stop_reason,
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+                cost_usd,
+                latency_ms,
+                extra={
+                    "llm.latency_ms": round(latency_ms, 2),
+                    "llm.cost_usd": cost_usd,
+                    "anthropic": response.model_dump(exclude_none=True),
+                },
+            )
 
             text_content = " ".join(
                 block.text
