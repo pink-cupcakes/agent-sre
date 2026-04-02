@@ -91,7 +91,8 @@ jobs:
             if argocd app sync agent-sre-dev \
                 --server $ARGOCD_SERVER \
                 --auth-token $ARGOCD_TOKEN \
-                --grpc-web; then
+                --grpc-web \
+                --insecure; then
               echo "✅ Synced agent-sre-dev"
               return 0
             else
@@ -100,7 +101,8 @@ jobs:
               argocd app sync agent-sre-dev \
                 --server $ARGOCD_SERVER \
                 --auth-token $ARGOCD_TOKEN \
-                --grpc-web || echo "ℹ️ Sync already in progress, continuing"
+                --grpc-web \
+                --insecure || echo "ℹ️ Sync already in progress, continuing"
             fi
           }
 
@@ -111,6 +113,7 @@ jobs:
             --kind Deployment \
             --server $ARGOCD_SERVER \
             --auth-token $ARGOCD_TOKEN \
-            --grpc-web
+            --grpc-web \
+            --insecure
 
           echo "✅ Deploy complete — ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest"
