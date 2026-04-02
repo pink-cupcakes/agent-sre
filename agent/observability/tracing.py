@@ -22,8 +22,8 @@ import sys
 from typing import Optional
 
 from ddtrace import config as dd_config
+from ddtrace import patch as dd_patch
 from ddtrace import tracer
-from ddtrace.contrib.logging import patch as dd_patch_logging
 
 from ..config import Config
 
@@ -43,7 +43,7 @@ def configure_logging(level: int = logging.INFO) -> None:
     so logs correlate with traces in Datadog.
     Probe endpoints are suppressed from uvicorn access logs to reduce noise.
     """
-    dd_patch_logging()
+    dd_patch(logging=True)
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(
         logging.Formatter(
