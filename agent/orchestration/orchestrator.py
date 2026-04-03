@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from ddtrace import tracer
+from agent.observability.tracer import tracer
 
 from agent.config import Config
 from agent.llm import LLMClient, LLMResponse

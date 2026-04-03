@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 
 import anthropic
-from ddtrace import tracer
+from agent.observability.tracer import tracer
 
 from agent.config import Config
 from agent.llm.pricing import get_cost_usd

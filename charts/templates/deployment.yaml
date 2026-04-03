@@ -14,11 +14,6 @@ spec:
     metadata:
       labels:
         app: {{ .Chart.Name }}
-        # Required for Datadog admission controller sidecar injection
-        admission.datadoghq.com/enabled: "true"
-      annotations:
-        admission.datadoghq.com/enabled: "true"
-        ad.datadoghq.com/{{ .Chart.Name }}.logs: '[{"source": "{{ .Chart.Name }}", "service": "{{ .Chart.Name }}", "type": "json"}]'
     spec:
       containers:
         - name: {{ .Chart.Name }}
@@ -33,11 +28,6 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-            # Datadog agent runs as a DaemonSet; reach it via the node's IP
-            - name: DD_AGENT_HOST
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:

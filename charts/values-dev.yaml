@@ -1,17 +1,12 @@
 image:
-  repository: 258131496527.dkr.ecr.us-west-2.amazonaws.com/agent-sre
+  repository: ghcr.io/YOUR_GITHUB_USERNAME/agent-sre
 
 namespace: agent-sre-dev
 
 replicaCount: 1
 
 ingress:
-  enabled: true
-  host: api-dev.pump.co
-  path: /agent-sre
+  enabled: false
 
 env:
   DEPLOYMENT_ENV: development
-  DD_ENV: dev
-
-secretsManagerPath: agent-sre-dev

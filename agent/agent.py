@@ -5,7 +5,7 @@ import sys
 import time
 from typing import Optional
 
-from ddtrace import tracer
+from agent.observability.tracer import tracer
 
 from agent.config import Config, load_config
 from agent.llm import LLMClient

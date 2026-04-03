@@ -29,14 +29,8 @@ resources:
 env:
   SERVICE_NAME: agent-sre
   DEPLOYMENT_ENV: development
-  DD_SERVICE: agent-sre
-  DD_ENV: dev
-  DD_LOGS_INJECTION: "true"
   LLM_MODEL: claude-sonnet-4-20250514
   AGENT_MAX_STEPS: "20"
-
-# AWS Secrets Manager path — must contain ANTHROPIC_API_KEY
-secretsManagerPath: agent-sre-dev
 
 securityContext:
   allowPrivilegeEscalation: false
